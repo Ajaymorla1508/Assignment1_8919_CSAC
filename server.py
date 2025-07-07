@@ -1,4 +1,6 @@
 import json
+import logging
+from datetime import datetime
 from os import environ as env
 from urllib.parse import quote_plus, urlencode
 
@@ -30,10 +32,13 @@ oauth.register(
 def requires_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if 'user' not in session:  # <-- Fix here
+        if 'user' not in session:
+            # Logging unauthorized access
+            app.logger.warning(f"UNAUTHORIZED: Access attempt to protected route, timestamp={datetime.now()}")
             return redirect('/login')
         return f(*args, **kwargs)
     return decorated
+
 
 @app.route("/login")
 def login():
@@ -45,8 +50,13 @@ def login():
 def callback():
     token = oauth.auth0.authorize_access_token()
     userinfo = token.get("userinfo")
-    session["user"] = userinfo  # Store as 'user'
+    session["user"] = userinfo
+
+    # Logging successful login
+    app.logger.info(f"LOGIN: user_id={userinfo.get('sub')}, email={userinfo.get('email')}, timestamp={datetime.now()}")
+
     return redirect("/")
+
 
 @app.route("/logout")
 def logout():
@@ -67,7 +77,10 @@ def logout():
 @requires_auth
 def protected():
     user = session.get("user")
-    print("DEBUG user object:", user)
+
+    # Logging access to protected route
+    app.logger.info(f"ACCESS: /protected by user_id={user.get('sub')}, email={user.get('email')}, timestamp={datetime.now()}")
+
     return render_template('protected.html', user=user)
 
 
@@ -76,4 +89,6 @@ def home():
     return render_template("home.html")
 
 if __name__ == "__main__":
+    #  Optional but useful: Stream logs to stdout for Azure
+    logging.basicConfig(level=logging.INFO)
     app.run(host="0.0.0.0", port=int(env.get("PORT", 3000)))
