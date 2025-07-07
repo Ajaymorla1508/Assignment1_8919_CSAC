@@ -1,235 +1,106 @@
-# Flask Auth0 Authentication Example
+# 🔐 Flask Auth0 Secure App with Azure Monitoring
 
-This tutorial demonstrates how to add user login to a Python web application built with the Flask framework and Authlib OAuth library.
+This project demonstrates how to secure a Python Flask web app using Auth0 and monitor authenticated user activity via Azure Monitor and KQL.
 
----
-
-## I want to integrate with my app
-
-**Estimated time:** 15 minutes
-
-### System requirements
-
-- Python 3
-- Authlib 1.0+
-- Flask 2.0+
+Built as part of **CST8919 – Assignment 1: Securing and Monitoring an Authenticated Flask App**.
 
 ---
 
-## Configure Auth0
+## 🚀 Features
 
-### Get Your Application Keys
-
-When you sign up for Auth0, a new application is created for you (or you can create a new one).  
-You will need the following details from your Auth0 Application Settings:
-
-- **Domain**
-- **Client ID**
-- **Client Secret**
-
-### Configure Callback URLs
-
-Add the following to your Auth0 Application Settings:
-
-- **Allowed Callback URLs:**  
-  `http://localhost:3000/callback`
-
-### Configure Logout URLs
-
-- **Allowed Logout URLs:**  
-  `http://localhost:3000`
+- Auth0 Single Sign-On (SSO)
+- `/login`, `/callback`, `/logout`, and protected `/protected` route
+- Structured logging for:
+  - Successful logins
+  - Access to protected route
+  - Unauthorized access attempts
+- Logs forwarded to Azure Monitor (Log Analytics)
+- KQL-based detection of excessive `/protected` access
+- Email alerts for suspicious behavior (via Azure Alerts)
 
 ---
 
-## Install dependencies
+## 🔧 Setup Instructions
 
-Create a `requirements.txt` file:
+### 🛠️ 1. Auth0 Setup
+- Create a new application in [Auth0 Dashboard](https://manage.auth0.com/)
+- **Allowed Callback URLs**:
+http://localhost:5000/callback
+https://ajay-flask-auth0-secure-app.azurewebsites.net/callback
 
-```txt
-flask>=2.0.3
-python-dotenv>=0.19.2
-authlib>=1.0
-requests>=2.27.1
-```
+- **Allowed Logout URLs**:
+- https://ajay-flask-auth0-secure-app.azurewebsites.net
 
-Install dependencies:
+- Add your credentials to `.env` (see `.env.example`)
 
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## Configure your .env file
-
-Create a `.env` file in your project directory:
-
-```properties
-AUTH0_CLIENT_ID=your_auth0_client_id
-AUTH0_CLIENT_SECRET=your_auth0_client_secret
-AUTH0_DOMAIN=your_auth0_domain
-APP_SECRET_KEY=your_flask_secret_key
-```
-
-Generate a suitable string for `APP_SECRET_KEY` using:
-
-```bash
-openssl rand -hex 32
-```
+### 🔧 2. Azure Deployment
+- Deployed to Azure App Service:  
+`https://ajay-flask-auth0-secure-app.azurewebsites.net`
+- AppService console logs forwarded to Log Analytics Workspace
+- App settings include:
+- `APP_ENV=production`
+- `LOG_LEVEL=info`
 
 ---
 
-## Setup your application
+## 📊 Monitoring & Alerts
 
-Create a `server.py` file and add the following:
-
+### ✅ Logging Format
+In `app.py`, logs are emitted as:
 ```python
-import json
-from os import environ as env
-from urllib.parse import quote_plus, urlencode
-
-from authlib.integrations.flask_client import OAuth
-from dotenv import find_dotenv, load_dotenv
-from flask import Flask, redirect, render_template, session, url_for
-from functools import wraps
-
-ENV_FILE = find_dotenv()
-if ENV_FILE:
-    load_dotenv(ENV_FILE)
-
-app = Flask(__name__)
-app.secret_key = env.get("APP_SECRET_KEY")
-
-oauth = OAuth(app)
-oauth.register(
-    "auth0",
-    client_id=env.get("AUTH0_CLIENT_ID"),
-    client_secret=env.get("AUTH0_CLIENT_SECRET"),
-    client_kwargs={"scope": "openid profile email"},
-    server_metadata_url=f'https://{env.get("AUTH0_DOMAIN")}/.well-known/openid-configuration'
-)
-
-def requires_auth(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if 'user' not in session:
-            return redirect('/login')
-        return f(*args, **kwargs)
-    return decorated
-
-@app.route("/login")
-def login():
-    return oauth.auth0.authorize_redirect(
-        redirect_uri=url_for("callback", _external=True)
-    )
-
-@app.route("/callback", methods=["GET", "POST"])
-def callback():
-    token = oauth.auth0.authorize_access_token()
-    userinfo = token.get("userinfo")
-    session["user"] = userinfo
-    return redirect("/")
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(
-        "https://" + env.get("AUTH0_DOMAIN")
-        + "/v2/logout?"
-        + urlencode(
-            {
-                "returnTo": url_for("home", _external=True),
-                "client_id": env.get("AUTH0_CLIENT_ID"),
-            },
-            quote_via=quote_plus,
-        )
-    )
-
-@app.route("/protected")
-@requires_auth
-def protected():
-    user = session.get("user")
-    return render_template('protected.html', user=user)
-
-@app.route("/")
-def home():
-    return render_template("home.html")
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(env.get("PORT", 3000)))
+app.logger.info(f"DEBUG user object: {user_info}")
 ```
+#### KQL Query Used
+AppServiceConsoleLogs
+| where TimeGenerated > ago(15m)
+| where ResultDescription has "DEBUG user object:"
+| parse ResultDescription with * "'email': '" email:string "'," * "'sub': '" user_id:string "'"
+| summarize access_count = count() by user_id, email
+| where access_count > 10
+| project user_id, email, access_count
+
+####📬 Azure Alert Rule
+Condition: When result count > 0
+Frequency: Every 5 minutes
+Severity: 3 (Low)
+Notification: Email via Action Group
+🧪 Test Script
+You can simulate route hits with:
+```python
+for i in {1..12}; do
+  curl -s https://ajay-flask-auth0-secure-app.azurewebsites.net/protected > /dev/null
+done
+```
+### test-app.http
+
+### Access protected route (unauthorized)
+GET https://ajay-flask-auth0-secure-app.azurewebsites.net/protected
+
+### Access protected route (authorized, manual browser login required)
+GET https://ajay-flask-auth0-secure-app.azurewebsites.net/protected
+
+### File Structure
+├── app.py
+├── requirements.txt
+├── .env.example
+├── test-app.http
+└── README.md
 
 ---
-
-## Add templates
-
-Create a `templates` directory and add these files:
-
-### `templates/home.html`
-
-```html
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Home</title>
-</head>
-<body>
-    {% if session.user %}
-        <h1>Welcome {{ session.user.name }}!</h1>
-        <p><a href="/protected">Go to Protected Page</a></p>
-        <p><a href="/logout">Logout</a></p>
-    {% else %}
-        <h1>Welcome!</h1>
-        <p><a href="/login">Login</a></p>
-        <p><a href="/protected">Go to Protected Page</a></p>
-    {% endif %}
-</body>
-</html>
-```
-
-### `templates/protected.html`
-
-```html
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Protected</title>
-</head>
-<body>
-    <h1>Protected Page</h1>
-    <p>Hi {{ user['name'] }}!</p>
-    <p>This page is protected and requires login.</p>
-    <p><a href="/logout">Logout</a></p>
-</body>
-</html>
-```
-
----
-
-## Run your application
-
-```bash
-python3 server.py
-```
-
-Visit [http://localhost:3000](http://localhost:3000) in your browser.
-
----
-
 ## Demo Video
 
 [Watch the 5-minute demo on YouTube](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
 
 ---
+## Reflection:
 
-## What I Learned
+What worked well: Integration between Flask, Auth0, and Azure logging was smooth. The alerting logic worked as expected after tuning the KQL.
 
-- How to integrate Auth0 authentication in a Flask app.
-- How to protect routes using session-based authentication.
-- How to use decorators for route protection in Flask.
-- How to manage environment variables securely.
+Improvements: Would improve token-based route access and move logs to a structured JSON format for easier parsing
 
 ---
 
-**New to Auth0?**  
-Learn [How Auth0 works](https://auth0.com/docs/get-started), how it integrates with Regular Web Applications, and which protocol it uses.
+## Author
+Ajay Morla
+
+
