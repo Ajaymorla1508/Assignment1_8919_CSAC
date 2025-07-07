@@ -50,7 +50,10 @@ In `app.py`, logs are emitted as:
 ```python
 app.logger.info(f"DEBUG user object: {user_info}")
 ```
-#### KQL Query Used
+
+## KQL Query for AppServiceConsoleLogs
+
+```kql
 AppServiceConsoleLogs
 | where TimeGenerated > ago(15m)
 | where ResultDescription has "DEBUG user object:"
@@ -58,13 +61,14 @@ AppServiceConsoleLogs
 | summarize access_count = count() by user_id, email
 | where access_count > 10
 | project user_id, email, access_count
-
-####📬 Azure Alert Rule
-Condition: When result count > 0
+```
+### Azure Alert Rule Configuration
+Condition: Result count > 0
 Frequency: Every 5 minutes
 Severity: 3 (Low)
 Notification: Email via Action Group
-🧪 Test Script
+
+## 🧪 Test Script
 You can simulate route hits with:
 ```python
 for i in {1..12}; do
